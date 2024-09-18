@@ -7,10 +7,17 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
+slack-bolt = { git = "https://github.com/seratch/bolt-python.git", branch = "assistant-apps" }
+aiohttp = "^3.10.5"
+python-dotenv = "^1.0.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.6.5"
+pyright = "^1.1.381"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+start = "slack_bolt_ai_agent.main:main"
