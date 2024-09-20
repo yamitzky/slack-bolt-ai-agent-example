@@ -64,7 +64,7 @@ async def find_help_pages(
 ):
     try:
         await set_title(payload["text"])
-        await set_status("ヘルプページを検索中...")
+        await set_status("入力中...")
         await asyncio.sleep(0.5)
         await say("こんにちは！こんにちは！")
     except Exception as e:
