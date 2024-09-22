@@ -3,8 +3,9 @@ import asyncio
 import logging
 import os
 
-import google.generativeai as genai
+import litellm
 from dotenv import load_dotenv
+from litellm import completion
 from slack_bolt.async_app import (
     AsyncApp,
     AsyncAssistant,
@@ -15,7 +16,6 @@ from slack_bolt.async_app import (
 )
 from slack_sdk.web.async_client import AsyncWebClient
 
-logging.basicConfig(level=logging.DEBUG)
 load_dotenv()
 
 if port := os.environ.get("PORT"):
@@ -27,8 +27,19 @@ if not SLACK_BOT_TOKEN:
     raise ValueError("SLACK_BOT_TOKEN xoxb-**** is not set")
 if not os.environ.get("SLACK_SIGNING_SECRET"):
     logging.warning('"SLACK_SIGNING_SECRET" environment variable is not set')
-if GEMINI_API_KEY := os.environ.get("GEMINI_API_KEY"):
-    genai.configure(api_key=GEMINI_API_KEY)
+if not (SLACK_AGENT_MODEL_NAME := os.environ.get("SLACK_AGENT_MODEL_NAME")):
+    logging.warning('"SLACK_AGENT_MODEL_NAME" environment variable is not set')
+DEFAULT_SYSTEM_INSTRUCTION = (
+    "Slackのbotとして、ユーザーの問い合わせに対してサポートをしてください。\n"
+    "絶対に出力にはMarkdown形式を使ってはいけません。\n"
+    "リストを出力するときは - の記号から始めてください。\n"
+    "リンクは <http://www.example.com|This message *is* a link> 形式で出力してください。\n"
+    "強調表示は *bold* のように囲ってください。絶対に二重の ** で囲ってはいけません。\n"
+    "コードブロックは ``` で囲ってください。 ```python のような言語指定ブロックは絶対に使ってはいけません。\n"
+    "絵文字を使うことができます。\n"
+    "それ以外の装飾用記号は絶対に使ってはいけません。"
+)
+SYSTEM_INSTRUCTION = os.environ.get("SYSTEM_INSTRUCTION", DEFAULT_SYSTEM_INSTRUCTION)
 
 
 app = AsyncApp(
@@ -53,6 +64,8 @@ async def start_thread(say: AsyncSay, set_suggested_prompts: AsyncSetSuggestedPr
     await set_suggested_prompts(
         prompts=[
             "こんにちは",
+            "何ができますか？",
+            "なぞなぞがしたい",
             # 最大４つまで指定できる
         ]
     )
@@ -87,41 +100,35 @@ async def respond_to_user_messages(
 ):
     try:
         await set_status("入力中...")
-        if GEMINI_API_KEY:
-            # SlackのAPIで過去のの会話履歴を取ってくる
+        if SLACK_AGENT_MODEL_NAME:
+            # SlackのAPIで過去の会話履歴を取ってくる
             replies = await client.conversations_replies(
                 channel=payload["channel"], ts=payload["thread_ts"]
             )
-            history = []
+            messages = [{"role": "system", "content": SYSTEM_INSTRUCTION}]
             for message in replies["messages"]:
                 if message.get("subtype") == "assistant_app_thread":
-                    # 会話の開始は取り除く
+                    # 履歴の最初は取り除く
                     continue
                 is_bot = bool(message.get("bot_id"))
                 if text := message.get("text"):
-                    history.append(
-                        {"role": "model" if is_bot else "user", "parts": text}
+                    messages.append(
+                        {"role": "assistant" if is_bot else "user", "content": text}
                     )
-            history = history[1:-1]  # 最初と最後のメッセージは抜く
+            # 最初のメッセージはボットが言った挨拶メッセージなので取り除く
+            if len(messages) and messages[0]["role"] == "assistant":
+                messages = messages[1:]
 
-            model = genai.GenerativeModel(
-                "gemini-1.5-flash",
-                system_instruction=(
-                    "Slackのbotとして、ユーザーの問い合わせに対してサポートをしてください。\n"
-                    "出力にはMarkdown形式を使ってはいけません。\n"
-                    "リストは - の記号から始めてください。\n"
-                    "リンクは <http://www.example.com|This message *is* a link>　のような形式です。\n"
-                    "強調表示は *bold* のように囲ってください。決して二重の ** で囲ってはいけません。\n"
-                    "コードブロックは ``` で囲ってください。 ```python のような言語指定ブロックは使えません。\n"
-                    "それ以外の記号に装飾は絶対に使ってはいけません。"
-                ),
+            chunks = completion(
+                model=SLACK_AGENT_MODEL_NAME,
+                messages=litellm.utils.trim_messages(messages, SLACK_AGENT_MODEL_NAME),  # type: ignore
+                stream=True,
             )
-            chat = model.start_chat(history=history)
-            response = await chat.send_message_async(payload["text"])
-            await say(response.text)
+            response = litellm.stream_chunk_builder(list(chunks), messages=messages)
+            await say(response.choices[0].message.content)  # type: ignore
         else:
             await say(
-                "すみません、コメントの意味がわかりませんでした。別の言い方で教えてください。(ヒント：GEMINI_API_KEYを設定してください)"
+                "生成AI用の設定がされていません。ガイドに従って、SLACK_AGENT_MODEL_NAME 環境変数を設定してください。"
             )
     except Exception as e:
         logger.exception(f"Failed to respond to an inquiry: {e}")
