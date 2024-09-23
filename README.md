@@ -114,7 +114,4 @@ Cloudflare tunnel URL + `/slack/events`.
 
 ## License
 
-[MIT License](LICENSE) This README provides a concise overview of your project,
-including its features, installation instructions, and usage guidelines. It also
-mentions the key dependencies and configuration options. Feel free to adjust any
-details as needed.
+[MIT License](https://github.com/yamitzky/slack-bolt-ai-agent-example/blob/main/LICENSE)
