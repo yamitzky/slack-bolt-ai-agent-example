@@ -22,4 +22,4 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-start = "slack_bolt_ai_agent.main:main"
+slack-ai-agent = "slack_bolt_ai_agent.main:main"
